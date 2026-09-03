@@ -154,7 +154,25 @@ DEFAULT_MODELS = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
 ]
-MODELS = [m.strip() for m in os.environ.get("GROQ_MODELS", "").split(",") if m.strip()] or DEFAULT_MODELS
+
+
+def _build_model_candidates():
+    configured = [
+        m.strip()
+        for m in os.environ.get("GROQ_MODELS", "").replace("\n", ",").split(",")
+        if m.strip()
+    ]
+    models = []
+    seen = set()
+    for model in configured + DEFAULT_MODELS:
+        key = model.lower()
+        if key not in seen:
+            seen.add(key)
+            models.append(model)
+    return models
+
+
+MODELS = _build_model_candidates()
 
 # Comprehensive verified reference — pypdf extraction lost ALL digits from
 # every PDF. This reference restores the complete data for the LLM.
@@ -713,15 +731,18 @@ def main():
 
         st.markdown("---")
         st.markdown("### Architecture Technique")
-        st.markdown("""
-        **Embedding:** all-MiniLM-L6-v2 (384-dim)
-        **Vector DB:** ChromaDB (cosine, HNSW)
-        **LLM Principal:** Llama-3.3-70B
-        **Fallback 1:** Llama-3.1-8B-Instant
-        **Fallback 2:** Qwen3-32B
-        **Temperature:** 0.4
-        **Chunking:** 1000 chars / 200 overlap
-        """)
+        llm_lines = []
+        if MODELS:
+            llm_lines.append(f"**LLM Principal:** {MODELS[0]}")
+            for i, fallback_model in enumerate(MODELS[1:], start=1):
+                llm_lines.append(f"**Fallback {i}:** {fallback_model}")
+        st.markdown("\n".join([
+            "**Embedding:** all-MiniLM-L6-v2 (384-dim)",
+            "**Vector DB:** ChromaDB (cosine, HNSW)",
+            *llm_lines,
+            "**Temperature:** 0.4",
+            "**Chunking:** 1000 chars / 200 overlap",
+        ]))
 
         st.markdown("---")
         st.markdown("### Grille de Ponderation")
