@@ -150,11 +150,11 @@ SCORING_CRITERIA = {
     }
 }
 
-MODELS = [
+DEFAULT_MODELS = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
-    "qwen/qwen3-32b",
 ]
+MODELS = [m.strip() for m in os.environ.get("GROQ_MODELS", "").split(",") if m.strip()] or DEFAULT_MODELS
 
 # Comprehensive verified reference — pypdf extraction lost ALL digits from
 # every PDF. This reference restores the complete data for the LLM.
@@ -418,29 +418,36 @@ def call_llm(system_prompt, user_prompt, model_index=0):
     if not client:
         return "Erreur : Clé API Groq non configurée.", "N/A"
 
-    model = MODELS[model_index] if model_index < len(MODELS) else MODELS[0]
-    try:
-        params = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "temperature": 0.4,
-            "max_tokens": 1500,
-            "top_p": 0.9,
-        }
-        response = client.chat.completions.create(**params)
-        content = response.choices[0].message.content
-        if not content:
-            content = "Reponse vide du modele."
-        return content, model
-    except Exception as e:
-        error_str = str(e)
-        if model_index < len(MODELS) - 1:
-            time.sleep(3)
-            return call_llm(system_prompt, user_prompt, model_index + 1)
-        return f"Erreur LLM ({model}): {error_str}", model
+    if not MODELS:
+        return "Erreur : aucun modèle Groq configuré.", "N/A"
+
+    start_idx = model_index if 0 <= model_index < len(MODELS) else 0
+    models_to_try = MODELS[start_idx:] + MODELS[:start_idx]
+    attempt_errors = []
+
+    for i, model in enumerate(models_to_try):
+        try:
+            params = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.4,
+                "max_tokens": 1500,
+                "top_p": 0.9,
+            }
+            response = client.chat.completions.create(**params)
+            content = response.choices[0].message.content
+            if not content:
+                content = "Reponse vide du modele."
+            return content, model
+        except Exception as e:
+            attempt_errors.append(f"{model}: {e}")
+            if i < len(models_to_try) - 1:
+                time.sleep(2)
+
+    return f"Erreur LLM: aucun modèle disponible ({' | '.join(attempt_errors)})", models_to_try[-1]
 
 
 def _similarity(a, b):
