@@ -30,6 +30,13 @@ def _chunk_id(source, page, idx, chunk):
     return f"{safe_source}_{safe_page}_{idx}_{chunk_hash}"
 
 
+def _get_or_create_collection(client):
+    return client.get_or_create_collection(
+        name=COLLECTION_NAME,
+        metadata={"hnsw:space": "cosine"}
+    )
+
+
 def build_embeddings():
     os.makedirs(CHROMA_DIR, exist_ok=True)
 
@@ -43,10 +50,7 @@ def build_embeddings():
     model = SentenceTransformer("all-MiniLM-L6-v2")
 
     client = chromadb.PersistentClient(path=CHROMA_DIR)
-    collection = client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        metadata={"hnsw:space": "cosine"}
-    )
+    collection = _get_or_create_collection(client)
     try:
         collection.delete(where={})
     except Exception:
@@ -69,12 +73,25 @@ def build_embeddings():
 
     if all_chunks:
         embeddings = model.encode(all_chunks, show_progress_bar=True).tolist()
-        collection.add(
-            documents=all_chunks,
-            embeddings=embeddings,
-            metadatas=all_metadatas,
-            ids=all_ids
-        )
+        try:
+            collection.add(
+                documents=all_chunks,
+                embeddings=embeddings,
+                metadatas=all_metadatas,
+                ids=all_ids
+            )
+        except Exception:
+            try:
+                client.delete_collection(COLLECTION_NAME)
+            except Exception:
+                pass
+            collection = _get_or_create_collection(client)
+            collection.add(
+                documents=all_chunks,
+                embeddings=embeddings,
+                metadatas=all_metadatas,
+                ids=all_ids
+            )
 
     return len(all_chunks)
 
@@ -82,22 +99,27 @@ def build_embeddings():
 def get_collection():
     os.makedirs(CHROMA_DIR, exist_ok=True)
     client = chromadb.PersistentClient(path=CHROMA_DIR)
-    return client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        metadata={"hnsw:space": "cosine"}
-    )
+    return _get_or_create_collection(client)
 
 
 def query_documents(query_text, n_results=5):
     model = SentenceTransformer("all-MiniLM-L6-v2")
     collection = get_collection()
     query_embedding = model.encode([query_text]).tolist()
-    results = collection.query(
-        query_embeddings=query_embedding,
-        n_results=n_results,
-        include=["documents", "metadatas", "distances"]
-    )
-    return results
+    try:
+        return collection.query(
+            query_embeddings=query_embedding,
+            n_results=n_results,
+            include=["documents", "metadatas", "distances"]
+        )
+    except Exception:
+        build_embeddings()
+        collection = get_collection()
+        return collection.query(
+            query_embeddings=query_embedding,
+            n_results=n_results,
+            include=["documents", "metadatas", "distances"]
+        )
 
 
 if __name__ == "__main__":

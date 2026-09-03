@@ -301,7 +301,16 @@ def init_rag():
             from fallahtech_rag.ingest import ingest_documents
             with st.spinner("Ingestion des documents FallahTech..."):
                 ingest_documents()
-        if not os.path.exists(chroma_path) or not os.listdir(chroma_path):
+        should_rebuild = not os.path.exists(chroma_path) or not os.listdir(chroma_path)
+
+        if not should_rebuild:
+            from fallahtech_rag.embeddings import get_collection
+            try:
+                should_rebuild = get_collection().count() == 0
+            except Exception:
+                should_rebuild = True
+
+        if should_rebuild:
             from fallahtech_rag.embeddings import build_embeddings
             with st.spinner("Construction des embeddings (all-MiniLM-L6-v2)..."):
                 build_embeddings()
