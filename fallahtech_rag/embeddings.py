@@ -1,5 +1,6 @@
 import os
 import json
+import hashlib
 import chromadb
 from sentence_transformers import SentenceTransformer
 
@@ -22,7 +23,23 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     return chunks
 
 
+def _chunk_id(source, page, idx, chunk):
+    chunk_hash = hashlib.sha1(chunk.encode("utf-8")).hexdigest()[:12]
+    safe_source = str(source).replace("/", "_").replace(" ", "_")
+    safe_page = str(page).replace("/", "_").replace(" ", "_")
+    return f"{safe_source}_{safe_page}_{idx}_{chunk_hash}"
+
+
+def _get_or_create_collection(client):
+    return client.get_or_create_collection(
+        name=COLLECTION_NAME,
+        metadata={"hnsw:space": "cosine"}
+    )
+
+
 def build_embeddings():
+    os.makedirs(CHROMA_DIR, exist_ok=True)
+
     if not os.path.exists(RAW_DOCS_FILE):
         from fallahtech_rag.ingest import ingest_documents
         ingest_documents()
@@ -33,14 +50,11 @@ def build_embeddings():
     model = SentenceTransformer("all-MiniLM-L6-v2")
 
     client = chromadb.PersistentClient(path=CHROMA_DIR)
+    collection = _get_or_create_collection(client)
     try:
-        client.delete_collection(COLLECTION_NAME)
+        collection.delete(where={})
     except Exception:
         pass
-    collection = client.create_collection(
-        name=COLLECTION_NAME,
-        metadata={"hnsw:space": "cosine"}
-    )
 
     all_chunks = []
     all_metadatas = []
@@ -54,36 +68,58 @@ def build_embeddings():
         for chunk in chunks:
             all_chunks.append(chunk)
             all_metadatas.append({"source": source, "page": str(page)})
-            all_ids.append(f"chunk_{idx}")
+            all_ids.append(_chunk_id(source, page, idx, chunk))
             idx += 1
 
     if all_chunks:
         embeddings = model.encode(all_chunks, show_progress_bar=True).tolist()
-        collection.add(
-            documents=all_chunks,
-            embeddings=embeddings,
-            metadatas=all_metadatas,
-            ids=all_ids
-        )
+        try:
+            collection.add(
+                documents=all_chunks,
+                embeddings=embeddings,
+                metadatas=all_metadatas,
+                ids=all_ids
+            )
+        except Exception:
+            try:
+                client.delete_collection(COLLECTION_NAME)
+            except Exception:
+                pass
+            collection = _get_or_create_collection(client)
+            collection.add(
+                documents=all_chunks,
+                embeddings=embeddings,
+                metadatas=all_metadatas,
+                ids=all_ids
+            )
 
     return len(all_chunks)
 
 
 def get_collection():
+    os.makedirs(CHROMA_DIR, exist_ok=True)
     client = chromadb.PersistentClient(path=CHROMA_DIR)
-    return client.get_collection(COLLECTION_NAME)
+    return _get_or_create_collection(client)
 
 
 def query_documents(query_text, n_results=5):
     model = SentenceTransformer("all-MiniLM-L6-v2")
     collection = get_collection()
     query_embedding = model.encode([query_text]).tolist()
-    results = collection.query(
-        query_embeddings=query_embedding,
-        n_results=n_results,
-        include=["documents", "metadatas", "distances"]
-    )
-    return results
+    try:
+        return collection.query(
+            query_embeddings=query_embedding,
+            n_results=n_results,
+            include=["documents", "metadatas", "distances"]
+        )
+    except Exception:
+        build_embeddings()
+        collection = get_collection()
+        return collection.query(
+            query_embeddings=query_embedding,
+            n_results=n_results,
+            include=["documents", "metadatas", "distances"]
+        )
 
 
 if __name__ == "__main__":
