@@ -29,8 +29,6 @@ pour produire un <b>scoring d'investissement</b> argumenté — et le même work
 
 ## 📸 Captures
 
-> Remplace les deux emplacements ci-dessous par tes captures, puis mets à jour les chemins.
-
 <p align="center">
   <img src="docs/screenshots/PLACEHOLDER-01-scoring-investissement.svg" width="49%" alt="Scoring d'investissement"/>
   <img src="docs/screenshots/PLACEHOLDER-02-jauges-plotly.svg" width="49%" alt="Jauges Plotly"/>
